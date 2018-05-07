@@ -14,6 +14,7 @@ from lxml.etree import QName
 from zeep import ns
 from zeep.exceptions import SignatureVerificationFailed
 from zeep.utils import detect_soap_env
+from zeep.wsdl.utils import get_or_create_header
 from zeep.wsse.utils import ensure_id, get_security_header
 
 try:
@@ -52,9 +53,9 @@ class MemorySignature(object):
         self.cert_data = cert_data
         self.password = password
 
-    def apply(self, envelope, headers):
+    def apply(self, envelope, headers, signatures=None):
         key = _make_sign_key(self.key_data, self.cert_data, self.password)
-        _sign_envelope_with_key(envelope, key)
+        _sign_envelope_with_key(envelope, key, signatures)
         return envelope, headers
 
     def verify(self, envelope):
@@ -76,9 +77,9 @@ class BinarySignature(Signature):
 
     Place the key information into BinarySecurityElement."""
 
-    def apply(self, envelope, headers):
+    def apply(self, envelope, headers, signatures=None):
         key = _make_sign_key(self.key_data, self.cert_data, self.password)
-        _sign_envelope_with_key_binary(envelope, key)
+        _sign_envelope_with_key_binary(envelope, key, signatures)
         return envelope, headers
 
 
@@ -91,7 +92,7 @@ def check_xmlsec_import():
         )
 
 
-def sign_envelope(envelope, keyfile, certfile, password=None):
+def sign_envelope(envelope, keyfile, certfile, password=None, signatures=None):
     """Sign given SOAP envelope with WSSE sig using given key and cert.
 
     Sign the wsu:Timestamp node in the wsse:Security header and the soap:Body;
@@ -181,10 +182,10 @@ def sign_envelope(envelope, keyfile, certfile, password=None):
     """
     # Load the signing key and certificate.
     key = _make_sign_key(_read_file(keyfile), _read_file(certfile), password)
-    return _sign_envelope_with_key(envelope, key)
+    return _sign_envelope_with_key(envelope, key, signatures)
 
 
-def _signature_prepare(envelope, key):
+def _signature_prepare(envelope, key, signatures=None):
     """Prepare envelope and sign."""
     soap_env = detect_soap_env(envelope)
 
@@ -210,8 +211,20 @@ def _signature_prepare(envelope, key):
     # Perform the actual signing.
     ctx = xmlsec.SignatureContext()
     ctx.key = key
-    _sign_node(ctx, signature, envelope.find(QName(soap_env, 'Body')))
+    # Sign default elements
     _sign_node(ctx, signature, security.find(QName(ns.WSU, 'Timestamp')))
+
+    # Sign extra elements defined in WSDL
+    if signatures is not None:
+        if signatures['body'] or signatures['everything']:
+            _sign_node(ctx, signature, envelope.find(QName(soap_env, 'Body')))
+        header = get_or_create_header(envelope)
+        if signatures['everything']:
+            for node in header.iterchildren():
+                _sign_node(ctx, signature, node)
+        else:
+            for node in signatures['header']:
+                _sign_node(ctx, signature, header.find(QName(node['Namespace'], node['Name'])))
     ctx.sign(signature)
 
     # Place the X509 data inside a WSSE SecurityTokenReference within
@@ -223,13 +236,13 @@ def _signature_prepare(envelope, key):
     return security, sec_token_ref, x509_data
 
 
-def _sign_envelope_with_key(envelope, key):
-    _, sec_token_ref, x509_data = _signature_prepare(envelope, key)
+def _sign_envelope_with_key(envelope, key, signatures=None):
+    _, sec_token_ref, x509_data = _signature_prepare(envelope, key, signatures=signatures)
     sec_token_ref.append(x509_data)
 
 
-def _sign_envelope_with_key_binary(envelope, key):
-    security, sec_token_ref, x509_data = _signature_prepare(envelope, key)
+def _sign_envelope_with_key_binary(envelope, key, signatures=None):
+    security, sec_token_ref, x509_data = _signature_prepare(envelope, key, signatures=signatures)
     ref = etree.SubElement(sec_token_ref, QName(ns.WSSE, 'Reference'),
                            {'ValueType': 'http://docs.oasis-open.org/wss/2004/01/'
                                          'oasis-200401-wss-x509-token-profile-1.0#X509v3'})

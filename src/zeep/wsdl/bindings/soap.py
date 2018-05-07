@@ -89,10 +89,10 @@ class SoapBinding(Binding):
                 if isinstance(client.wsse, list):
                     for wsse in client.wsse:
                         envelope, http_headers = wsse.apply(
-                            envelope, http_headers)
+                            envelope, http_headers, operation_obj.binding.signatures)
                 else:
                     envelope, http_headers = client.wsse.apply(
-                        envelope, http_headers)
+                        envelope, http_headers, operation_obj.binding.signatures)
 
         # Add extra http headers from the setings object
         if client.settings.extra_http_headers:

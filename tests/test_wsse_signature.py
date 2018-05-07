@@ -82,7 +82,9 @@ def test_verify_error():
         </soapenv:Envelope>
     """)
 
-    signature.sign_envelope(envelope, KEY_FILE, KEY_FILE)
+    # Force body signature
+    signatures = {'everything': False, 'body': True, 'header': []}
+    signature.sign_envelope(envelope, KEY_FILE, KEY_FILE, signatures=signatures)
     nsmap = {'tns': 'http://tests.python-zeep.org/'}
 
     for elm in envelope.xpath('//tns:Argument', namespaces=nsmap):
